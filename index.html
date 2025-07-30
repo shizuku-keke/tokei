@@ -46,7 +46,7 @@
         #pause-resume-btn:disabled { background-color: #bdc3c7; }
         #settings-btn { background-color: #34495e; color: white; }
 
-        /* --- 記録カードエリア (ここから追加) --- */
+        /* --- 記録カードエリア --- */
         #records-container { width: 90%; max-width: 550px; margin: 0 auto; }
         #records-container h2 { color: #34495e; border-bottom: 2px solid #34495e; padding-bottom: 5px; }
         #records-list { max-height: 400px; overflow-y: auto; padding: 5px; }
@@ -70,6 +70,14 @@
         #subject-list li { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; }
         #subject-list li span { flex-grow: 1; text-align: left; }
         .list-btn { margin-left: 5px; font-size: 0.8rem; }
+        /* ★追加: モーダル内ボタンのレイアウト用 */
+        .modal-buttons {
+            margin-top: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
     </style>
 </head>
 <body>
@@ -89,14 +97,13 @@
         </div>
     </div>
 
-    <!-- 記録カードエリアのHTML (ここから追加) -->
     <div id="records-container">
         <h2>勉強の記録</h2>
         <div id="records-list"></div>
         <button id="clear-records-btn" class="control-btn">すべての記録を削除</button>
     </div>
 
-    <!-- 教科設定モーダルのHTML -->
+    <!-- ★変更: 教科設定モーダルのHTML -->
     <div id="settings-modal" class="modal">
         <div class="modal-content">
             <h2>教科の管理</h2>
@@ -105,15 +112,19 @@
                 <button id="add-subject-btn">追加</button>
             </div>
             <ul id="subject-list"></ul>
-            <button id="close-modal-btn" class="control-btn">保存して閉じる</button>
+            <div class="modal-buttons">
+                <button id="reset-subjects-btn" class="control-btn" style="background-color: #c0392b; color: white;">教科をリセット</button>
+                <button id="close-modal-btn" class="control-btn">保存して閉じる</button>
+            </div>
         </div>
     </div>
 
     <script>
         // --- グローバル変数 ---
+        const DEFAULT_SUBJECTS = ["英語", "数学", "思考中", "PC", "ゲーム", "その他"]; // ★追加: デフォルトの教科リスト
         let subjects = [];
         let studyData = {};
-        let records = []; // ★追加: 記録カード用の配列
+        let records = []; 
 
         let state = 'stopped';
         let timerInterval = null;
@@ -134,11 +145,11 @@
         const addSubjectBtn = document.getElementById('add-subject-btn');
         const newSubjectInput = document.getElementById('new-subject-input');
         const subjectListEl = document.getElementById('subject-list');
-        // ★追加: 記録カード関連のDOM要素
+        const resetSubjectsBtn = document.getElementById('reset-subjects-btn'); // ★追加
         const recordsListEl = document.getElementById('records-list');
         const clearRecordsBtn = document.getElementById('clear-records-btn');
 
-        // --- 時間フォーマット (★更新) ---
+        // --- 時間フォーマット ---
         function formatTime(totalSeconds, type = 'display') {
             const h = Math.floor(totalSeconds / 3600);
             const m = Math.floor((totalSeconds % 3600) / 60);
@@ -148,12 +159,12 @@
             }
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         }
-        function updateTimer() { /* 変更なし */
+        function updateTimer() {
             const now = Date.now(), delta = (now - lastTimestamp) / 1000;
             totalElapsedTime += delta; lastTimestamp = now; timerEl.textContent = formatTime(totalElapsedTime);
         }
 
-        // --- ★追加: 記録カードの管理関数 ---
+        // --- 記録カードの管理関数 ---
         function renderRecords() {
             recordsListEl.innerHTML = '';
             if (records.length === 0) {
@@ -181,7 +192,7 @@
         function loadRecords() { const r = localStorage.getItem('studyAppRecords'); records = r ? JSON.parse(r) : []; }
 
         // --- 教科の選択と切り替え ---
-        function selectSubject(subjectName) { /* 変更なし */
+        function selectSubject(subjectName) {
             if (state === 'running' && currentSubject !== subjectName) {
                 const d = (Date.now() - sessionStartTime) / 1000;
                 if(currentSubject) studyData[currentSubject] += d;
@@ -193,21 +204,20 @@
             if(state === 'stopped') startStopBtn.disabled = false;
         }
 
-        // --- コントロールボタンの処理 (★更新) ---
+        // --- コントロールボタンの処理 ---
         function handleStartStop() {
-            if (state === 'stopped') { /* スタート処理: 変更なし */
+            if (state === 'stopped') {
                 state = 'running'; lastTimestamp = Date.now(); sessionStartTime = Date.now();
                 timerInterval = setInterval(updateTimer, 100);
                 startStopBtn.textContent = 'ストップ'; startStopBtn.classList.add('stop');
                 pauseResumeBtn.disabled = false; settingsBtn.disabled = true;
-            } else { /* ストップ処理: 変更あり */
+            } else { 
                 if(state === 'running') {
                     const d = (Date.now() - sessionStartTime) / 1000;
                     if(currentSubject) studyData[currentSubject] += d;
                 }
                 clearInterval(timerInterval);
                 
-                // ポップアップ表示
                 let summary = "お疲れ様でした！\n\n【今回の記録】\n";
                 let hasStudied = false;
                 Object.keys(studyData).forEach(s => {
@@ -216,21 +226,21 @@
                 });
                 if (!hasStudied) summary = "今回は勉強記録がありませんでした。";
 
-                if (totalElapsedTime > 1) { // 1秒以上勉強した場合のみ
-                    alert(summary); // ポップアップ表示
+                if (totalElapsedTime > 1) { 
+                    alert(summary); 
                     const newRecord = {
                         date: new Date().toLocaleString('ja-JP'),
                         totalTime: totalElapsedTime,
                         details: { ...studyData }
                     };
-                    records.unshift(newRecord); // 配列の先頭に記録を追加
+                    records.unshift(newRecord); 
                     saveRecords();
-                    renderRecords(); // 画面を更新
+                    renderRecords(); 
                 }
                 resetState();
             }
         }
-        function handlePauseResume() { /* 変更なし */
+        function handlePauseResume() {
             if (state === 'running') {
                 state = 'paused'; clearInterval(timerInterval);
                 const d = (Date.now() - sessionStartTime) / 1000;
@@ -244,7 +254,7 @@
         }
 
         // --- 状態リセット ---
-        function resetState() { /* 変更なし */
+        function resetState() {
             state = 'stopped'; totalElapsedTime = 0; currentSubject = null;
             Object.keys(studyData).forEach(key => studyData[key] = 0);
             timerEl.textContent = '00:00:00'; currentSubjectEl.textContent = '教科を選んでください';
@@ -254,13 +264,14 @@
             document.querySelectorAll('.subject-btn').forEach(btn => btn.classList.remove('active'));
         }
 
-        // --- 教科設定関連の関数 ---
-        function loadSubjects() { /* ユーザーのカスタム教科を維持 */
+        // --- 教科設定関連の関数 (★変更あり) ---
+        function loadSubjects() {
             const storedSubjects = localStorage.getItem('studyAppSubjects');
-            subjects = storedSubjects ? JSON.parse(storedSubjects) : ["英語", "数学", "思考中", "PC", "ゲーム", "その他"];
+            // ★変更: デフォルトリストを定数から読み込む
+            subjects = storedSubjects ? JSON.parse(storedSubjects) : [...DEFAULT_SUBJECTS];
         }
-        function saveSubjects() { /* 変更なし */ localStorage.setItem('studyAppSubjects', JSON.stringify(subjects)); }
-        function renderSubjectButtons() { /* 変更なし */
+        function saveSubjects() { localStorage.setItem('studyAppSubjects', JSON.stringify(subjects)); }
+        function renderSubjectButtons() {
             subjectButtonsContainer.innerHTML = ''; studyData = {};
             subjects.forEach(s => {
                 const b = document.createElement('button'); b.className = 'subject-btn';
@@ -269,7 +280,7 @@
                 subjectButtonsContainer.appendChild(b); studyData[s] = 0;
             });
         }
-        function renderModalList() { /* 変更なし */
+        function renderModalList() {
             subjectListEl.innerHTML = ''; subjects.forEach((s, i) => {
                 const li = document.createElement('li'); const n = document.createElement('span'); n.textContent = s;
                 const e = document.createElement('button'); e.textContent = '編集'; e.className = 'list-btn';
@@ -280,7 +291,7 @@
             });
         }
 
-        // --- イベントリスナーの設定 ---
+        // --- イベントリスナーの設定 (★変更あり) ---
         startStopBtn.addEventListener('click', handleStartStop);
         pauseResumeBtn.addEventListener('click', handlePauseResume);
         settingsBtn.addEventListener('click', () => { renderModalList(); settingsModal.style.display = 'flex'; });
@@ -290,7 +301,16 @@
             if (n && !subjects.includes(n)) { subjects.push(n); newSubjectInput.value = ''; renderModalList(); }
             else if (n) { alert('その教科はすでに存在します。'); }
         });
-        // ★追加: 記録カード関連のイベントリスナー
+        
+        // ★追加: 教科リセットボタンのイベントリスナー
+        resetSubjectsBtn.addEventListener('click', () => {
+            if (confirm('本当に教科リストを初期状態に戻しますか？\nこの操作は元に戻せません。')) {
+                subjects = [...DEFAULT_SUBJECTS]; // デフォルトのリストで上書き
+                renderModalList(); // モーダル内のリスト表示を更新
+                alert('教科リストがリセットされました。\n「保存して閉じる」ボタンで変更が確定します。');
+            }
+        });
+
         clearRecordsBtn.addEventListener('click', () => {
             if (confirm('本当にすべての記録を削除しますか？')) { records = []; saveRecords(); renderRecords(); }
         });
@@ -301,18 +321,17 @@
             }
         });
 
-        // --- アプリの初期化処理 (★更新) ---
+        // --- アプリの初期化処理 ---
         function initialize() {
             loadSubjects();
             renderSubjectButtons();
-            loadRecords(); // ★追加
-            renderRecords(); // ★追加
+            loadRecords();
+            renderRecords();
             resetState();
         }
 
         initialize();
         
-        //localStorage.removeItem('studyAppSubjects');で消せる
     </script>
 </body>
 </html>
