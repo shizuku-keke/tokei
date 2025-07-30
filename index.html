@@ -69,8 +69,8 @@
         #subject-list { list-style: none; padding: 0; margin-top: 20px; max-height: 200px; overflow-y: auto; }
         #subject-list li { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; }
         #subject-list li span { flex-grow: 1; text-align: left; }
+        #subject-list li input { flex-grow: 1; margin-right: 5px; }
         .list-btn { margin-left: 5px; font-size: 0.8rem; }
-        /* ★追加: モーダル内ボタンのレイアウト用 */
         .modal-buttons {
             margin-top: 20px;
             display: flex;
@@ -103,7 +103,6 @@
         <button id="clear-records-btn" class="control-btn">すべての記録を削除</button>
     </div>
 
-    <!-- ★変更: 教科設定モーダルのHTML -->
     <div id="settings-modal" class="modal">
         <div class="modal-content">
             <h2>教科の管理</h2>
@@ -114,6 +113,7 @@
             <ul id="subject-list"></ul>
             <div class="modal-buttons">
                 <button id="reset-subjects-btn" class="control-btn" style="background-color: #c0392b; color: white;">教科をリセット</button>
+                <button id="cancel-edit-btn" class="control-btn" style="background-color: #7f8c8d; color: white;">戻る</button>
                 <button id="close-modal-btn" class="control-btn">保存して閉じる</button>
             </div>
         </div>
@@ -121,7 +121,7 @@
 
     <script>
         // --- グローバル変数 ---
-        const DEFAULT_SUBJECTS = ["英語", "数学", "思考中", "PC", "ゲーム", "その他"]; // ★追加: デフォルトの教科リスト
+        const DEFAULT_SUBJECTS = ["英語", "数学", "思考中", "作業", "ゲーム", "その他"];
         let subjects = [];
         let studyData = {};
         let records = []; 
@@ -145,7 +145,8 @@
         const addSubjectBtn = document.getElementById('add-subject-btn');
         const newSubjectInput = document.getElementById('new-subject-input');
         const subjectListEl = document.getElementById('subject-list');
-        const resetSubjectsBtn = document.getElementById('reset-subjects-btn'); // ★追加
+        const resetSubjectsBtn = document.getElementById('reset-subjects-btn');
+        const cancelEditBtn = document.getElementById('cancel-edit-btn');
         const recordsListEl = document.getElementById('records-list');
         const clearRecordsBtn = document.getElementById('clear-records-btn');
 
@@ -264,10 +265,9 @@
             document.querySelectorAll('.subject-btn').forEach(btn => btn.classList.remove('active'));
         }
 
-        // --- 教科設定関連の関数 (★変更あり) ---
+        // --- 教科設定関連の関数 ---
         function loadSubjects() {
             const storedSubjects = localStorage.getItem('studyAppSubjects');
-            // ★変更: デフォルトリストを定数から読み込む
             subjects = storedSubjects ? JSON.parse(storedSubjects) : [...DEFAULT_SUBJECTS];
         }
         function saveSubjects() { localStorage.setItem('studyAppSubjects', JSON.stringify(subjects)); }
@@ -280,44 +280,105 @@
                 subjectButtonsContainer.appendChild(b); studyData[s] = 0;
             });
         }
+        
         function renderModalList() {
-            subjectListEl.innerHTML = ''; subjects.forEach((s, i) => {
-                const li = document.createElement('li'); const n = document.createElement('span'); n.textContent = s;
+            subjectListEl.innerHTML = '';
+            subjects.forEach((s, i) => {
+                const li = document.createElement('li');
+                const n = document.createElement('span'); n.textContent = s;
                 const e = document.createElement('button'); e.textContent = '編集'; e.className = 'list-btn';
-                e.onclick = () => { const N = prompt('新しい教科名:', s); if (N && N.trim()) { subjects[i] = N.trim(); renderModalList(); } };
                 const d = document.createElement('button'); d.textContent = '削除'; d.className = 'list-btn';
-                d.onclick = () => { if (confirm(`「${s}」を削除しますか？`)) { subjects.splice(i, 1); renderModalList(); } };
-                li.appendChild(n); li.appendChild(e); li.appendChild(d); subjectListEl.appendChild(li);
+
+                e.onclick = () => {
+                    if (subjectListEl.querySelector('input')) return;
+                    const inputEl = document.createElement('input'); inputEl.type = 'text'; inputEl.value = s;
+                    li.replaceChild(inputEl, n); e.style.display = 'none'; d.style.display = 'none';
+                    inputEl.focus();
+                    
+                    // ★ 変更: 処理中フラグを追加して、イベントの重複実行を防ぐ
+                    let isProcessing = false;
+
+                    const finishEdit = (shouldSave) => {
+                        if (isProcessing) return; // 既に処理中なら何もしない
+                        isProcessing = true;
+
+                        if (shouldSave) {
+                            const newName = inputEl.value.trim();
+                            const isNew = newName && newName !== s;
+                            const isDuplicate = isNew && subjects.filter((_, idx) => idx !== i).includes(newName);
+
+                            if (isDuplicate) {
+                                alert('その教科名はすでに存在します。');
+                            } else if (isNew) {
+                                subjects[i] = newName;
+                            }
+                        }
+                        renderModalList();
+                    };
+
+                    inputEl.addEventListener('blur', () => finishEdit(true));
+                    inputEl.addEventListener('keydown', (evt) => {
+                        if (evt.key === 'Enter') {
+                            evt.preventDefault();
+                            finishEdit(true);
+                        } else if (evt.key === 'Escape') {
+                            finishEdit(false);
+                        }
+                    });
+                };
+
+                d.onclick = () => { subjects.splice(i, 1); renderModalList(); };
+
+                li.appendChild(n); li.appendChild(e); li.appendChild(d);
+                subjectListEl.appendChild(li);
             });
         }
 
-        // --- イベントリスナーの設定 (★変更あり) ---
+        // --- イベントリスナーの設定 ---
         startStopBtn.addEventListener('click', handleStartStop);
         pauseResumeBtn.addEventListener('click', handlePauseResume);
-        settingsBtn.addEventListener('click', () => { renderModalList(); settingsModal.style.display = 'flex'; });
-        closeModalBtn.addEventListener('click', () => { saveSubjects(); renderSubjectButtons(); resetState(); settingsModal.style.display = 'none'; });
+        settingsBtn.addEventListener('click', () => { 
+            loadSubjects(); 
+            renderModalList(); 
+            settingsModal.style.display = 'flex'; 
+        });
+        
+        closeModalBtn.addEventListener('click', () => {
+            saveSubjects();
+            renderSubjectButtons();
+            resetState();
+            settingsModal.style.display = 'none';
+        });
+
+        cancelEditBtn.addEventListener('click', () => {
+            loadSubjects();
+            settingsModal.style.display = 'none';
+        });
+
         addSubjectBtn.addEventListener('click', () => {
             const n = newSubjectInput.value.trim();
             if (n && !subjects.includes(n)) { subjects.push(n); newSubjectInput.value = ''; renderModalList(); }
             else if (n) { alert('その教科はすでに存在します。'); }
         });
         
-        // ★追加: 教科リセットボタンのイベントリスナー
         resetSubjectsBtn.addEventListener('click', () => {
-            if (confirm('本当に教科リストを初期状態に戻しますか？\nこの操作は元に戻せません。')) {
-                subjects = [...DEFAULT_SUBJECTS]; // デフォルトのリストで上書き
-                renderModalList(); // モーダル内のリスト表示を更新
-                alert('教科リストがリセットされました。\n「保存して閉じる」ボタンで変更が確定します。');
-            }
+            subjects = [...DEFAULT_SUBJECTS];
+            renderModalList();
+            alert('教科リストがリセットされました。\n「保存して閉じる」ボタンで変更が確定します。');
         });
 
         clearRecordsBtn.addEventListener('click', () => {
-            if (confirm('本当にすべての記録を削除しますか？')) { records = []; saveRecords(); renderRecords(); }
+            records = []; 
+            saveRecords(); 
+            renderRecords();
         });
+
         recordsListEl.addEventListener('click', (event) => {
             if (event.target.matches('.delete-record-btn')) {
                 const index = event.target.dataset.index;
-                if (confirm(`この記録を削除しますか？`)) { records.splice(index, 1); saveRecords(); renderRecords(); }
+                records.splice(index, 1); 
+                saveRecords(); 
+                renderRecords();
             }
         });
 
