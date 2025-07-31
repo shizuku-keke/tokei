@@ -48,11 +48,25 @@
 
         /* --- 記録カードエリア --- */
         #records-container { width: 90%; max-width: 550px; margin: 0 auto; }
-        #records-container h2 { color: #34495e; border-bottom: 2px solid #34495e; padding-bottom: 5px; }
-        #records-list { max-height: 400px; overflow-y: auto; padding: 5px; }
-        .record-card { position: relative; background-color: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.07); padding: 15px; margin-bottom: 15px; text-align: left; }
-        .record-card h3 { margin: 0 0 10px 0; font-size: 1.1rem; color: #2c3e50; padding-right: 25px; }
-        .record-card p { margin: 0 0 10px 0; font-size: 1rem; font-weight: bold; color: #e74c3c; }
+        #records-container h2 { color: #34495e; border-bottom: 2px solid #34495e; padding-bottom: 5px; text-align: left; }
+        #records-list {
+            display: flex; overflow-x: auto; overflow-y: hidden; padding: 5px 5px 20px 5px; gap: 15px;
+            scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+        }
+        #records-list::-webkit-scrollbar { height: 8px; }
+        #records-list::-webkit-scrollbar-track { background: #f0f2f5; border-radius: 4px; }
+        #records-list::-webkit-scrollbar-thumb { background: #bdc3c7; border-radius: 4px; }
+        #records-list::-webkit-scrollbar-thumb:hover { background: #95a5a6; }
+
+        .record-card {
+            position: relative; background-color: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+            padding: 15px; text-align: left; flex: 0 0 85%; max-width: 320px; scroll-snap-align: start; margin-bottom: 0;
+        }
+        #records-list .no-record-message { width: 100%; text-align: center; color: #7f8c8d; }
+
+        .record-card h3 { margin: 0 0 5px 0; font-size: 1.1rem; color: #2c3e50; padding-right: 25px; }
+        .record-card .record-meta { margin: 0 0 10px 0; font-size: 0.9rem; color: #7f8c8d; }
+        .record-card .record-total-time { margin: 0 0 10px 0; font-size: 1rem; font-weight: bold; color: #e74c3c; }
         .record-card ul { list-style: none; padding: 0; margin: 0; font-size: 0.9rem; }
         .record-card li { padding: 3px 0; border-bottom: 1px dashed #eee; }
         .record-card li:last-child { border-bottom: none; }
@@ -71,13 +85,10 @@
         #subject-list li span { flex-grow: 1; text-align: left; }
         #subject-list li input { flex-grow: 1; margin-right: 5px; }
         .list-btn { margin-left: 5px; font-size: 0.8rem; }
-        .modal-buttons {
-            margin-top: 20px;
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 10px;
-        }
+        .modal-buttons { margin-top: 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+
+        /* --- ツールチップ --- */
+        .tooltip { display: none; position: absolute; background-color: #34495e; color: white; padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; z-index: 1001; pointer-events: none; white-space: nowrap; transition: opacity 0.1s; }
     </style>
 </head>
 <body>
@@ -98,7 +109,7 @@
     </div>
 
     <div id="records-container">
-        <h2>勉強の記録</h2>
+        <h2>過去の記録</h2>
         <div id="records-list"></div>
         <button id="clear-records-btn" class="control-btn">すべての記録を削除</button>
     </div>
@@ -119,18 +130,21 @@
         </div>
     </div>
 
+    <div id="subject-tooltip" class="tooltip"></div>
+
     <script>
         // --- グローバル変数 ---
-        const DEFAULT_SUBJECTS = ["英語", "数学", "思考中", "作業", "ゲーム", "その他"];
+        const DEFAULT_SUBJECTS = ["数学",”英語”,"思考中", "作業中", "休憩中", "課題中"];
         let subjects = [];
         let studyData = {};
-        let records = []; 
+        let records = [];
 
         let state = 'stopped';
         let timerInterval = null;
         let totalElapsedTime = 0;
         let lastTimestamp = 0;
         let sessionStartTime = 0;
+        let studySessionStartTime = null;
         let currentSubject = null;
 
         // --- DOM要素の取得 ---
@@ -149,46 +163,71 @@
         const cancelEditBtn = document.getElementById('cancel-edit-btn');
         const recordsListEl = document.getElementById('records-list');
         const clearRecordsBtn = document.getElementById('clear-records-btn');
+        const tooltipEl = document.getElementById('subject-tooltip');
 
         // --- 時間フォーマット ---
-        function formatTime(totalSeconds, type = 'display') {
-            const h = Math.floor(totalSeconds / 3600);
-            const m = Math.floor((totalSeconds % 3600) / 60);
-            const s = Math.floor(totalSeconds % 60);
-            if (type === 'card') {
-                return `${h}時間 ${m}分 ${s}秒`;
-            }
+        function formatTime(totalSeconds) {
+            const seconds = Math.floor(Math.max(0, totalSeconds || 0));
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         }
+
         function updateTimer() {
             const now = Date.now(), delta = (now - lastTimestamp) / 1000;
             totalElapsedTime += delta; lastTimestamp = now; timerEl.textContent = formatTime(totalElapsedTime);
         }
 
         // --- 記録カードの管理関数 ---
+        /* ★ 変更: 記録カードのレイアウトを修正 */
         function renderRecords() {
             recordsListEl.innerHTML = '';
             if (records.length === 0) {
-                recordsListEl.innerHTML = '<p style="color: #7f8c8d;">まだ記録がありません。</p>';
+                recordsListEl.innerHTML = '<p class="no-record-message">まだ記録がありません。</p>';
                 clearRecordsBtn.style.display = 'none'; return;
             }
             clearRecordsBtn.style.display = 'inline-block';
             
+            const week = ['日', '月', '火', '水', '木', '金', '土'];
+
             records.forEach((record, index) => {
                 const card = document.createElement('div');
                 card.className = 'record-card';
+                
+                // --- 日付と時刻の情報を生成 ---
+                const startDate = record.startTime ? new Date(record.startTime) : null;
+                const endDate = new Date(record.date);
+                const dateForHeader = startDate || endDate;
+
+                const headerDateStr = `${dateForHeader.getFullYear()}/${dateForHeader.getMonth() + 1}/${dateForHeader.getDate()}`;
+                const dayOfWeek = week[dateForHeader.getDay()];
+                const headerText = `${headerDateStr} (${dayOfWeek})`;
+
+                const startTimeStr = startDate ? `${startDate.getHours().toString().padStart(2, '0')}:${startDate.getMinutes().toString().padStart(2, '0')}` : '??:??';
+                const endTimeStr = `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`;
+                const timeRangeText = `${startTimeStr} - ${endTimeStr}`;
+
+                // --- 内訳リストのHTMLを生成 ---
                 let detailsHtml = '<ul>';
                 Object.keys(record.details).forEach(subject => {
-                    const subjectSeconds = Math.round(record.details[subject]);
-                    if (subjectSeconds > 0) detailsHtml += `<li>${subject}: ${formatTime(subjectSeconds, 'card')}</li>`;
+                    const subjectSeconds = record.details[subject];
+                    if (subjectSeconds > 0) detailsHtml += `<li>${subject}: ${formatTime(subjectSeconds)}</li>`;
                 });
                 detailsHtml += '</ul>';
 
                 const deleteBtnHtml = `<button class="delete-record-btn" data-index="${index}" title="この記録を削除">×</button>`;
-                card.innerHTML = `${deleteBtnHtml}<h3>${record.date}</h3><p>総勉強時間: ${formatTime(record.totalTime, 'card')}</p>${detailsHtml}`;
+
+                // --- カードのHTMLを組み立てる ---
+                card.innerHTML = `${deleteBtnHtml}
+                                  <h3>${headerText}</h3>
+                                  <p class="record-meta">${timeRangeText}</p>
+                                  <p class="record-total-time">総勉強時間: ${formatTime(record.totalTime)}</p>
+                                  ${detailsHtml}`;
                 recordsListEl.appendChild(card);
             });
         }
+
         function saveRecords() { localStorage.setItem('studyAppRecords', JSON.stringify(records)); }
         function loadRecords() { const r = localStorage.getItem('studyAppRecords'); records = r ? JSON.parse(r) : []; }
 
@@ -209,9 +248,11 @@
         function handleStartStop() {
             if (state === 'stopped') {
                 state = 'running'; lastTimestamp = Date.now(); sessionStartTime = Date.now();
+                studySessionStartTime = new Date();
                 timerInterval = setInterval(updateTimer, 100);
                 startStopBtn.textContent = 'ストップ'; startStopBtn.classList.add('stop');
-                pauseResumeBtn.disabled = false; settingsBtn.disabled = true;
+                pauseResumeBtn.disabled = false;
+                settingsBtn.disabled = false; 
             } else { 
                 if(state === 'running') {
                     const d = (Date.now() - sessionStartTime) / 1000;
@@ -222,21 +263,28 @@
                 let summary = "お疲れ様でした！\n\n【今回の記録】\n";
                 let hasStudied = false;
                 Object.keys(studyData).forEach(s => {
-                    const sec = Math.round(studyData[s]);
-                    if (sec > 0) { hasStudied = true; summary += `・${s}: ${formatTime(sec, 'card')}\n`; }
+                    const sec = studyData[s];
+                    if (sec > 0) { hasStudied = true; summary += `・${s}: ${formatTime(sec)}\n`; }
                 });
                 if (!hasStudied) summary = "今回は勉強記録がありませんでした。";
 
                 if (totalElapsedTime > 1) { 
                     alert(summary); 
+                    const formatDateTime = (dateObj) => {
+                        return dateObj.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                    };
                     const newRecord = {
-                        date: new Date().toLocaleString('ja-JP'),
+                        startTime: formatDateTime(studySessionStartTime),
+                        date: formatDateTime(new Date()),
                         totalTime: totalElapsedTime,
                         details: { ...studyData }
                     };
-                    records.unshift(newRecord); 
+                    records.push(newRecord); 
                     saveRecords();
-                    renderRecords(); 
+                    renderRecords();
+                    setTimeout(() => {
+                        recordsListEl.scrollLeft = recordsListEl.scrollWidth;
+                    }, 100);
                 }
                 resetState();
             }
@@ -257,12 +305,13 @@
         // --- 状態リセット ---
         function resetState() {
             state = 'stopped'; totalElapsedTime = 0; currentSubject = null;
-            Object.keys(studyData).forEach(key => studyData[key] = 0);
+            studySessionStartTime = null;
             timerEl.textContent = '00:00:00'; currentSubjectEl.textContent = '教科を選んでください';
             startStopBtn.textContent = 'スタート'; startStopBtn.classList.remove('stop'); startStopBtn.disabled = true;
             pauseResumeBtn.textContent = '一時停止'; pauseResumeBtn.disabled = true;
             settingsBtn.disabled = false;
             document.querySelectorAll('.subject-btn').forEach(btn => btn.classList.remove('active'));
+            renderSubjectButtons(); 
         }
 
         // --- 教科設定関連の関数 ---
@@ -271,14 +320,47 @@
             subjects = storedSubjects ? JSON.parse(storedSubjects) : [...DEFAULT_SUBJECTS];
         }
         function saveSubjects() { localStorage.setItem('studyAppSubjects', JSON.stringify(subjects)); }
+
         function renderSubjectButtons() {
-            subjectButtonsContainer.innerHTML = ''; studyData = {};
+            subjectButtonsContainer.innerHTML = '';
+            
+            if (state === 'stopped') { studyData = {}; }
+
+            const currentSubjectsInSession = Object.keys(studyData);
+            for (const sub of currentSubjectsInSession) {
+                if (!subjects.includes(sub)) { delete studyData[sub]; }
+            }
+            
             subjects.forEach(s => {
-                const b = document.createElement('button'); b.className = 'subject-btn';
+                if (!studyData.hasOwnProperty(s)) { studyData[s] = 0; }
+                const b = document.createElement('button');
+                b.className = 'subject-btn';
                 b.textContent = s; b.dataset.subject = s;
                 b.addEventListener('click', () => selectSubject(s));
-                subjectButtonsContainer.appendChild(b); studyData[s] = 0;
+
+                b.addEventListener('mouseover', () => {
+                    if (state === 'stopped') { return; }
+                    const subject = b.dataset.subject;
+                    let currentSessionSeconds = studyData[subject] || 0;
+                    if (state === 'running' && subject === currentSubject) {
+                        currentSessionSeconds += (Date.now() - sessionStartTime) / 1000;
+                    }
+                    tooltipEl.innerHTML = `${subject}: ${formatTime(currentSessionSeconds)}`;
+                    tooltipEl.style.display = 'block';
+                });
+                b.addEventListener('mouseout', () => { tooltipEl.style.display = 'none'; });
+                b.addEventListener('mousemove', (e) => {
+                    if (tooltipEl.style.display === 'block') {
+                        tooltipEl.style.left = `${e.pageX + 15}px`;
+                        tooltipEl.style.top = `${e.pageY + 15}px`;
+                    }
+                });
+                subjectButtonsContainer.appendChild(b);
             });
+
+            if (currentSubject && subjects.includes(currentSubject)) {
+                document.querySelector(`.subject-btn[data-subject="${currentSubject}"]`)?.classList.add('active');
+            }
         }
         
         function renderModalList() {
@@ -295,40 +377,41 @@
                     li.replaceChild(inputEl, n); e.style.display = 'none'; d.style.display = 'none';
                     inputEl.focus();
                     
-                    // ★ 変更: 処理中フラグを追加して、イベントの重複実行を防ぐ
                     let isProcessing = false;
-
                     const finishEdit = (shouldSave) => {
-                        if (isProcessing) return; // 既に処理中なら何もしない
-                        isProcessing = true;
-
+                        if (isProcessing) return; isProcessing = true;
                         if (shouldSave) {
                             const newName = inputEl.value.trim();
-                            const isNew = newName && newName !== s;
+                            const oldName = s;
+                            const isNew = newName && newName !== oldName;
                             const isDuplicate = isNew && subjects.filter((_, idx) => idx !== i).includes(newName);
-
-                            if (isDuplicate) {
-                                alert('その教科名はすでに存在します。');
+                            if (isDuplicate) { alert('その教科名はすでに存在します。');
                             } else if (isNew) {
                                 subjects[i] = newName;
+                                if (studyData.hasOwnProperty(oldName)) {
+                                    studyData[newName] = studyData[oldName]; delete studyData[oldName];
+                                }
+                                if (currentSubject === oldName) {
+                                    currentSubject = newName; currentSubjectEl.textContent = `現在の教科: ${currentSubject}`;
+                                }
                             }
                         }
                         renderModalList();
                     };
-
                     inputEl.addEventListener('blur', () => finishEdit(true));
                     inputEl.addEventListener('keydown', (evt) => {
-                        if (evt.key === 'Enter') {
-                            evt.preventDefault();
-                            finishEdit(true);
-                        } else if (evt.key === 'Escape') {
-                            finishEdit(false);
-                        }
+                        if (evt.key === 'Enter') { evt.preventDefault(); finishEdit(true); } 
+                        else if (evt.key === 'Escape') { finishEdit(false); }
                     });
                 };
-
-                d.onclick = () => { subjects.splice(i, 1); renderModalList(); };
-
+                d.onclick = () => {
+                    const subjectToDelete = subjects[i];
+                    if (studyData.hasOwnProperty(subjectToDelete)) { delete studyData[subjectToDelete]; }
+                    if (currentSubject === subjectToDelete) {
+                        currentSubject = null; sessionStartTime = 0; currentSubjectEl.textContent = '教科を選んでください';
+                    }
+                    subjects.splice(i, 1); renderModalList();
+                };
                 li.appendChild(n); li.appendChild(e); li.appendChild(d);
                 subjectListEl.appendChild(li);
             });
@@ -337,62 +420,47 @@
         // --- イベントリスナーの設定 ---
         startStopBtn.addEventListener('click', handleStartStop);
         pauseResumeBtn.addEventListener('click', handlePauseResume);
-        settingsBtn.addEventListener('click', () => { 
-            loadSubjects(); 
-            renderModalList(); 
-            settingsModal.style.display = 'flex'; 
-        });
-        
-        closeModalBtn.addEventListener('click', () => {
-            saveSubjects();
-            renderSubjectButtons();
-            resetState();
-            settingsModal.style.display = 'none';
-        });
-
-        cancelEditBtn.addEventListener('click', () => {
-            loadSubjects();
-            settingsModal.style.display = 'none';
-        });
-
+        settingsBtn.addEventListener('click', () => { loadSubjects(); renderModalList(); settingsModal.style.display = 'flex'; });
+        closeModalBtn.addEventListener('click', () => { saveSubjects(); renderSubjectButtons(); settingsModal.style.display = 'none'; });
+        cancelEditBtn.addEventListener('click', () => { loadSubjects(); settingsModal.style.display = 'none'; });
         addSubjectBtn.addEventListener('click', () => {
             const n = newSubjectInput.value.trim();
-            if (n && !subjects.includes(n)) { subjects.push(n); newSubjectInput.value = ''; renderModalList(); }
-            else if (n) { alert('その教科はすでに存在します。'); }
+            if (n && !subjects.includes(n)) {
+                subjects.push(n);
+                if(state !== 'stopped') { if (!studyData.hasOwnProperty(n)) studyData[n] = 0; }
+                newSubjectInput.value = ''; renderModalList();
+            } else if (n) { alert('その教科はすでに存在します。'); }
         });
-        
         resetSubjectsBtn.addEventListener('click', () => {
-            subjects = [...DEFAULT_SUBJECTS];
-            renderModalList();
-            alert('教科リストがリセットされました。\n「保存して閉じる」ボタンで変更が確定します。');
+            if(confirm("教科のリストを初期状態に戻します。よろしいですか？")) {
+                if(state !== 'stopped') { alert('タイマー作動中のリセットはできません。一度タイマーをストップしてください。'); return; }
+                subjects = [...DEFAULT_SUBJECTS]; renderModalList();
+            }
         });
-
         clearRecordsBtn.addEventListener('click', () => {
-            records = []; 
-            saveRecords(); 
-            renderRecords();
+            if(confirm("すべての勉強記録を削除します。よろしいですか？")) {
+                records = []; saveRecords(); renderRecords();
+            }
         });
-
         recordsListEl.addEventListener('click', (event) => {
             if (event.target.matches('.delete-record-btn')) {
-                const index = event.target.dataset.index;
-                records.splice(index, 1); 
-                saveRecords(); 
-                renderRecords();
+                const index = parseInt(event.target.dataset.index, 10);
+                if (!isNaN(index)) {
+                    records.splice(index, 1);
+                    saveRecords();
+                    renderRecords();
+                }
             }
         });
 
         // --- アプリの初期化処理 ---
         function initialize() {
             loadSubjects();
-            renderSubjectButtons();
             loadRecords();
             renderRecords();
             resetState();
         }
-
         initialize();
-        
     </script>
 </body>
 </html>
